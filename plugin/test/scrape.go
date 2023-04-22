@@ -216,7 +216,7 @@ func makeBuckets(m *dto.Metric) map[string]string {
 
 func fetchMetricFamilies(url string, ch chan<- *dto.MetricFamily) {
 	defer close(ch)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return
 	}

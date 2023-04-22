@@ -18,6 +18,7 @@ Every message is sent to the socket as soon as it comes in, the *dnstap* plugin 
 dnstap SOCKET [full] {
   [identity IDENTITY]
   [version VERSION]
+  [skipverify]
 }
 ~~~
 
@@ -25,6 +26,7 @@ dnstap SOCKET [full] {
 * `full` to include the wire-format DNS message.
 * **IDENTITY** to override the identity of the server. Defaults to the hostname.
 * **VERSION** to override the version field. Defaults to the CoreDNS version.
+* `skipverify` to skip tls verification during connection. Default to be secure
 
 ## Examples
 
@@ -61,6 +63,23 @@ dnstap /tmp/dnstap.sock {
 }
 ~~~
 
+Log to a remote TLS endpoint.
+
+~~~ txt
+dnstap tls://127.0.0.1:6000 full {
+  skipverify
+}
+~~~
+
+You can use _dnstap_ more than once to define multiple taps. The following logs information including the
+wire-format DNS message about client requests and responses to */tmp/dnstap.sock*,
+and also sends client requests and responses without wire-format DNS messages to a remote FQDN.
+
+~~~ txt
+dnstap /tmp/dnstap.sock full
+dnstap tcp://example.com:6000
+~~~
+
 ## Command Line Tool
 
 Dnstap has a command line tool that can be used to inspect the logging. The tool can be found
@@ -86,13 +105,15 @@ $ dnstap -l 127.0.0.1:6000
 
 ## Using Dnstap in your plugin
 
-In your setup function, check to see if the *dnstap* plugin is loaded:
+In your setup function, collect and store a list of all *dnstap* plugins loaded in the config:
 
 ~~~ go
+x :=  &ExamplePlugin{}
+
 c.OnStartup(func() error {
     if taph := dnsserver.GetConfig(c).Handler("dnstap"); taph != nil {
-        if tapPlugin, ok := taph.(dnstap.Dnstap); ok {
-            f.tapPlugin = &tapPlugin
+        for tapPlugin, ok := taph.(*dnstap.Dnstap); ok; tapPlugin, ok = tapPlugin.Next.(*dnstap.Dnstap) {
+            x.tapPlugins = append(x.tapPlugins, tapPlugin)
         }
     }
     return nil
@@ -102,8 +123,13 @@ c.OnStartup(func() error {
 And then in your plugin:
 
 ~~~ go
-func (x RandomPlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-    if tapPlugin != nil {
+import (
+  github.com/coredns/coredns/plugin/dnstap/msg
+  tap "github.com/dnstap/golang-dnstap"
+)
+
+func (x ExamplePlugin) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+    for _, tapPlugin := range x.tapPlugins {
         q := new(msg.Msg)
         msg.SetQueryTime(q, time.Now())
         msg.SetQueryAddress(q, w.RemoteAddr())
